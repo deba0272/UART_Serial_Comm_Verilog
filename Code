@@ -1,0 +1,221 @@
+Code:
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 09.09.2024 19:29:29
+// Design Name: 
+// Module Name: uart
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module uart(clk,start,txin,tx,rx,rxout,rxdone,txdone);
+input clk,start,rx;
+input [7:0]txin;
+output reg tx;
+output [7:0] rxout;
+output rxdone,txdone;
+parameter clk_value=100_000;
+parameter baud=9600;
+parameter wait_count=clk_value/baud;//This is done basically as sytem clock is too high and for uart communication protocol required baud rate of 9600 which is slow.
+
+reg bit_done=0;
+integer count=0;
+parameter idle=0,send=1,check=2;
+reg [1:0] state=idle;
+//Trigger for baud rate
+always@(posedge clk)
+begin
+if(state==idle)
+begin
+count<=0;
+end
+else begin
+if(count==wait_count)
+begin
+bit_done<=1'b1;
+count<=0;
+end
+else
+begin
+count<=count+1;
+bit_done<=1'b0;
+end
+end
+end
+
+//Transmission logic
+reg [9:0] txdata;//total 10 bits(1 start bit,8 data bits,1 stop bit).
+integer bitindex=0;
+reg [9:0] shifttx=0;
+//considered 3 state(Mealy FSM based as it depends on both current state and input signal)
+always@(posedge clk)
+begin
+case(state)//For idle state(FSM based concept)
+idle:
+begin
+tx<=1'b1;
+txdata<=0;
+bitindex<=0;
+shifttx<=0;
+
+if(start==1'b1)
+begin
+txdata<={1'b1,txin,1'b0};//10bits
+state<=send;
+end
+else
+begin
+state<=idle;
+end
+end
+
+send://send state
+begin
+tx<=txdata[bitindex];
+state<=check;
+shifttx<={txdata[bitindex],shifttx[9:1]};
+end
+
+check://check state
+begin
+if(bitindex<=9)
+begin
+if(bit_done==1'b1)
+begin
+state<=send;
+bitindex<=bitindex+1;
+end
+end
+else
+begin
+state<=idle;
+bitindex<=0;
+end
+end
+default:state<=idle;
+endcase
+end
+assign txdone=(bitindex==9 && bit_done==1'b1)?1'b1:1'b0;
+
+//Reciever Logic
+integer rcount=0;
+integer rindex=0;
+parameter ridle=0,rwait=1,recv=2,rcheck=3;
+reg [1:0] rstate;
+reg [9:0] rxdata;
+always@(posedge clk)
+begin
+case(rstate)
+ridle:
+begin
+rxdata<=0;
+rindex<=0;
+rcount<=0;
+if(rx==1'b0)
+begin
+rstate<=rwait;
+end
+else
+begin
+rstate<=ridle;
+end
+end
+
+rwait:
+begin
+if(rcount<wait_count/2)
+begin
+rcount<=rcount+1;
+rstate<=rwait;
+end
+else
+begin
+rcount<=0;
+rstate<=recv;
+rxdata<={rx,rxdata[9:1]};
+end
+end
+
+recv:
+begin
+if(rindex<=9)
+begin
+if(bit_done==1'b1)
+begin
+rindex<=rindex+1;
+rstate<=rwait;
+end
+end
+else
+begin
+rstate<=ridle;
+rindex<=0;
+end
+end
+default:rstate<=ridle;
+endcase
+end
+assign rxout=rxdata[8:1];
+assign rxdone=(rindex==9 && bit_done==1'b1)?1'b1:1'b0;
+endmodule
+
+
+
+Testbench:
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 10.09.2024 11:15:28
+// Design Name: 
+// Module Name: uart_tb
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module uart_tb;
+reg clk=0;
+reg start=0;
+reg [7:0] txin;
+wire [7:0] rxout;
+wire rxdone,txdone;
+wire txrx;
+uart dut(clk,start,txin,txrx,txrx,rxout,rxdone,txdone);
+integer i=0;
+initial
+begin
+start=1;
+for(i=0;i<10;i=i+1)
+begin
+txin=$urandom_range(10,200);
+@(posedge rxdone);
+@(posedge txdone);
+end
+$stop;
+end
+always #5 clk=~clk;
+endmodule
